@@ -1,0 +1,213 @@
+---
+title: "R Notebook"
+output: 
+ html_document:
+  toc: true
+  theme: simplex
+  highlight: kate
+  code_folding: show 
+---
+
+
+```{r, warning=FALSE, message=FALSE}
+
+library(tidyverse)
+library(scales)
+
+```
+
+### Load the data
+```{r, warning=FALSE, message=FALSE}
+
+data.raw <- read_csv("Looks_v_Personality.csv")
+
+```
+
+### Process the data
+```{r}
+
+data.prep <- data.raw %>% 
+  # Exclude the unweighted sample - non representative of the population
+  # Exclude the text description of rank
+  select(-unweighted_sample, -rank_text) %>% 
+  mutate(nationality = factor(nationality)
+         , gender = factor(gender, levels = c("Men", "Women"), labels = c("M", "F"))
+         #, rank_num = factor(rank_num, levels = c(6:1), labels = c(6:1), ordered = T)
+         , value_pc = if_else(gender == "M", -value_pc, value_pc))
+
+```
+
+### Understand the data
+```{r}
+
+# Print a list of countries
+data.prep %>% 
+  select(nationality) %>% 
+  distinct()
+
+# Extract a sample of the primary key fields
+data.prep %>% 
+  filter(gender == "M" & nationality == "French") %>% 
+  select(nationality, gender, question) %>% 
+  distinct()
+
+```
+
+### Prepare data for visualisation
+```{r}
+
+offset.cntry <- 0.100
+offset.world <- 0.200
+
+func_chooseNationality <- function(inputNationality) {
+  
+  data.plot <- data.prep %>% 
+    filter(nationality == inputNationality) %>%  
+    mutate(rank_num = rank_num - offset.cntry)
+
+  # Prepare an object for the rest of the world
+  data.world <- data.prep %>% 
+    # Exclude the chosen country from this object
+    filter(nationality != inputNationality) %>% 
+    mutate(rank_num = rank_num + offset.world)
+  
+  rtn.list <- list(cntry = data.plot, world = data.world)
+  
+  return(rtn.list)
+  
+}
+
+plot.Australian <- func_chooseNationality("Australian")
+plot.British <- func_chooseNationality("British")
+plot.HongKong <- func_chooseNationality("Hong Kong")
+
+```
+
+
+### Visualise the data {.tabset .tabset-fade .tabset-pills}
+Begin by preparing a theme object
+```{r }
+
+ggtheme <- theme(axis.title = element_text(size = 8, colour = "grey60")
+                 , axis.text = element_text(size = 6, colour = "grey60")
+                 , axis.line = element_line(colour = "grey90")
+                 , axis.ticks = element_blank()
+                 , panel.background = element_blank()
+                 , panel.border = element_blank()
+                 , panel.grid.major = element_blank()
+                 , panel.grid.minor = element_blank()
+                 , legend.background = element_blank()
+                 , legend.box.background = element_blank()
+                 , legend.title = element_text(size = 8, colour = "grey60")
+                 , legend.text = element_text(size = 7, colour = "grey60")
+                 , legend.key = element_rect(fill = NA)
+                 , plot.subtitle = element_text(size = 8, colour = "grey40")
+                 , plot.title = element_text(size = 12, colour = "grey40")
+                 , strip.background = element_blank()
+                 , strip.text = element_text(size = 8, colour = "grey60"))
+
+```
+
+Create a function for repeated plotting. The function receives two datasets:  
+  
+  + Country specific dataset  
+  + Rest of the world dataset
+```{r }
+
+func_plotCountry <- function(inputCountry, inputWorld) {
+  
+  # Extract the country name for the plot title
+  lbl <- inputCountry %>% 
+    select(nationality) %>% 
+    mutate(nationality = as.character(nationality)) %>% 
+    distinct() %>% 
+    as.character()
+  
+  g <- ggplot() +
+    # Add the first layer of points for the country
+    # Using ticks to represent their values
+    # Colour by gender
+    geom_point(data = inputCountry
+             , aes(y = rank_num, x = value_pc, colour = gender)
+             , alpha = 1, shape = "|", size = 3) +
+    # Add the next layer of points for the rest of the world
+    # Using the same gender attribute for colour and fill
+    geom_point(data = inputWorld
+               , aes(y = rank_num, x = value_pc, colour = gender, fill = gender)
+               , alpha = 0.05, shape = 22, size = 2.25) +
+    # Add a layer of labels for this particular country
+    geom_text(data = inputCountry %>% filter(abs(value_pc) > 0.05)
+             , aes(y = rank_num - 0.35, x = value_pc, colour = gender, label = scales::percent(abs(value_pc)))
+             , alpha = 1, size = 2.75, show.legend = F) +
+    ggtheme + 
+    # Assign colour and fill scales
+    scale_fill_manual(values = c("M" = "dodgerblue2", "F" = "firebrick2")) +
+    scale_colour_manual(values = c("M" = "dodgerblue3", "F" = "firebrick3")) +
+    # Force the x axis to show an absolute value
+    scale_x_continuous(labels = scales::trans_format("abs", percent)) + 
+    # Reverse the direction of the y axis so the ordering is intuitive
+    scale_y_reverse(breaks = c(1:6)) + 
+    #scale_y_continuous() +
+    ylab("Rank (Importance)") + 
+    xlab("% of respondants") +
+    # Create panels for each question
+    facet_wrap(~question) +
+    # Add a plot title
+    ggtitle(paste0("Ranked measures of compatability for ", lbl, " men and women")
+            , subtitle = paste0("Ticks showing results for the ", lbl
+            , " population, compared to rest of the world distribution"))
+  
+  return(g)
+  
+}
+
+```
+
+#### Britain
+```{r fig.width=9, fig.height=6}
+
+func_plotCountry(inputCountry = plot.British$cntry
+                 , inputWorld = plot.British$world)
+
+```
+  
+Some observations about the British:  
+  
+  + Money doesn't really matter for the Brits. The majority of respondants gave this the lowest, and mostly out-scoring the rest of the world for both genders.  
+  + Looks also don't matter a lot. The distribution for British men however, was more skewed towards looks making mattering compared to women.   
+  + Similar interests however, are pereived as more important for women than men.  
+  
+***
+#### Hong Kong
+```{r fig.width=9, fig.height=6}
+
+func_plotCountry(inputCountry = plot.HongKong$cntry
+                 , inputWorld = plot.HongKong$world)
+
+
+```
+  
+Some observations on people in Hong Kong: 
+  
+  + Money doesn't matter much for both men and women. Compared to the rest of the world however, money mattered just a little bit more.
+  + For men, looks are quite important compared to the rest of the world. 
+  + Personality is still important, but not as important as rated by the most of the rest of the world. 
+  
+***
+#### Australia
+```{r fig.width=9, fig.height=6}
+
+func_plotCountry(inputCountry = plot.Australian$cntry
+                 , inputWorld = plot.Australian$world)
+
+```
+  
+Some observations about Australians:  
+  
+  + In terms of importance of money and personality, Australian men and women sit mid-field among other coutries. 
+  + Across the other measures, Australians are also placed roughly in the middle of the distribution. Perhaps this is a testament to the multicultural composition of Australian society.  
+  
+
+***
+### Conclusions  
+Generally across the world, money doesn't matter as much as personality does. Comforting, I guess. 
